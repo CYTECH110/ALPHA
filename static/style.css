@@ -1,0 +1,96 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent; /* removes gray flash on mobile taps */
+}
+
+h2 {
+    font-size: 1.3rem;
+    padding: 10px;
+    margin: 0;
+}
+
+#map {
+    height: 60vh;
+    width: 100%;
+}
+
+#controls {
+    padding: 15px;
+}
+
+.input-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin: 10px auto;
+    max-width: 500px;
+    flex-wrap: wrap;
+}
+
+button {
+    font-size: 16px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: none;
+    background-color: #2563eb;
+    color: white;
+    cursor: pointer;
+    touch-action: manipulation; /* prevents double-tap-zoom delay on mobile */
+}
+
+button:active {
+    background-color: #1d4ed8;
+}
+
+#mic-btn {
+    font-size: 18px;
+    padding: 14px 28px;
+    width: 90%;
+    max-width: 320px;
+}
+
+#destination-select,
+#text-fallback {
+    font-size: 16px; /* 16px prevents iOS Safari from auto-zooming on focus */
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    flex: 1;
+    min-width: 180px;
+}
+
+#status {
+    padding: 0 15px;
+    font-size: 15px;
+    color: #333;
+}
+
+/* ---------- Mobile-specific adjustments ---------- */
+@media (max-width: 480px) {
+    #map {
+        height: 50vh;
+    }
+
+    h2 {
+        font-size: 1.1rem;
+    }
+
+    .input-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #destination-select,
+    #text-fallback,
+    button {
+        width: 100%;
+    }
+}

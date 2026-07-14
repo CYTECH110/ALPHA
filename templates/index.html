@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ALPHA — UEW South Campus Voice Navigator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<h2>🎓 ALPHA — UEW South Campus Voice Navigator</h2>
+
+<div id="map" style="height: 70vh; width: 100%;"></div>
+<div id="controls">
+   <button id="mic-btn">🎤 Listen Now</button>
+    <p id="status">Waiting for GPS lock...</p>
+
+    <div class="input-row">
+        <select id="destination-select">
+            <option value="">-- Choose a destination from the main entrance --</option>
+        </select>
+        <button id="select-btn">Go</button>
+    </div>
+
+    <div class="input-row">
+        <input type="text" id="text-fallback" placeholder="...or type a destination">
+        <button id="text-btn">Go</button>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---------- 1. Map setup ----------
+
+// Bounding box calculated from all 22 surveyed coordinates:
+// Latitude range:  5.33758 (Winneba Guesthouse) to 5.34026 (Advance Park)
+// Longitude range: -0.63020 (Advance Park) to -0.62378 (Kwame Nkrumah Avenue)
+// Padded slightly on each side so no marker sits right on the edge.
+const CAMPUS_BOUNDS = [
+    [5.3355, -0.6320],   // south-west corner
+    [5.3420, -0.6220]    // north-east corner
+];
+
+const map = L.map('map', {
+    maxBounds: CAMPUS_BOUNDS,
+    maxBoundsViscosity: 1.0,  // hard wall -- can't drag/pan past the edge
+    minZoom: 15
+}).setView([5.3389, -0.6265], 16); // centered over all 22 locations
+
+map.setMaxBounds(CAMPUS_BOUNDS);
+
+// Satellite base layer (Esri World Imagery — free, no API key required)
+const satelliteLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri' }
+);
+
+// Standard street map layer (kept as an option too)
+const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+});
+
+streetLayer.addTo(map); // street map loads by default (satellite has cert issues on some networks)
+
+// Adds a small layer-switcher control in the top-right of the map
+L.control.layers({
+    "Satellite": satelliteLayer,
+    "Street Map": streetLayer
+}).addTo(map);
+
+// Landmarks passed in from Flask (see app.py home() route)
+const landmarks = {{ landmarks | tojson }};
+for (const [name, coords] of Object.entries(landmarks)) {
+    L.marker(coords).addTo(map).bindPopup(name);
+}
+// Populate the destination dropdown with every known landmark,
+// nicely capitalized, sorted alphabetically for easy scanning.
+// Populate the destination dropdown with every known landmark,
+// nicely capitalized, sorted alphabetically -- excluding locations
+// we don't want selectable from this menu.
+const EXCLUDED_FROM_DROPDOWN = ["advance park","mosque", "ict department"];
+
+
+const destinationSelect = document.getElementById('destination-select');
+const sortedLandmarkNames = Object.keys(landmarks)
+    .filter(name => !EXCLUDED_FROM_DROPDOWN.includes(name))
+    .sort();
+
+for (const name of sortedLandmarkNames) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name.replace(/\b\w/g, char => char.toUpperCase()); // Title Case
+    destinationSelect.appendChild(option);
+}
+
+let routeLine = null;
+let userMarker = null;
+const WAYPOINT_THRESHOLD_METERS = 15;
+
+function drawRoute(coordinates) {
+    if (routeLine) map.removeLayer(routeLine);
+    routeLine = L.polyline(coordinates, { color: 'blue', weight: 5 }).addTo(map);
+    map.fitBounds(routeLine.getBounds());
+}
+
+function updateUserMarker(lat, lon) {
+    const position = [lat, lon];
+    if (!userMarker) {
+        userMarker = L.circleMarker(position, {
+            radius: 8,
+            color: '#ffffff',
+            weight: 2,
+            fillColor: '#e11d48',
+            fillOpacity: 1
+        }).addTo(map).bindPopup('You are here');
+    } else {
+        userMarker.setLatLng(position);
+    }
+}
+
+// ---------- 2. Text-to-speech ----------
+function speak(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    speechSynthesis.speak(utterance);
+}
+
+function speakThen(text, callback) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = callback;
+    speechSynthesis.speak(utterance);
+}
+
+// ---------- 3. Trip state & live guidance ----------
+let currentRoute = null;
+let currentStepIndex = 0;
+let tripActive = false;
+
+function startTrip(routeData) {
+    currentRoute = routeData;
+    currentStepIndex = 1;
+    tripActive = true;
+    speak(currentRoute.turn_instructions[0].instruction);
+}
+
+function handlePositionUpdate(lat, lon) {
+    updateUserMarker(lat, lon);
+
+    if (!tripActive || !currentRoute) return;
+    if (currentStepIndex >= currentRoute.turn_instructions.length) return;
+
+    const step = currentRoute.turn_instructions[currentStepIndex];
+    const target = L.latLng(step.trigger_coords[0], step.trigger_coords[1]);
+    const userPos = L.latLng(lat, lon);
+    const distance = userPos.distanceTo(target);
+
+    if (distance <= WAYPOINT_THRESHOLD_METERS) {
+        speak(step.instruction);
+        currentStepIndex++;
+        if (currentStepIndex >= currentRoute.turn_instructions.length) {
+            tripActive = false;
+            document.getElementById('status').innerText = 'Trip complete.';
+        }
+    }
+}
+
+// ---------- 4. GPS position sharing ----------
+// watchPosition (below) continuously keeps this updated in the background.
+// Both the "you are here" dot AND the route requests reuse this same
+// value, instead of making a separate, slower GPS request each time.
+let lastKnownPosition = null;
+
+// Wraps the browser's one-time location API in a Promise (kept as a
+// fallback for the wake-word "where am I" check, which wants a fresh fix).
+function getCurrentPosition() {
+    return new Promise((resolve, reject) => {
+        if (!('geolocation' in navigator)) {
+            reject(new Error('Geolocation not supported'));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 30000
+        });
+    });
+}
+
+async function sendCommand(commandText) {
+    let requestBody = { command: commandText };
+
+    if (lastKnownPosition) {
+        requestBody.user_lat = lastKnownPosition.lat;
+        requestBody.user_lon = lastKnownPosition.lon;
+        document.getElementById('status').innerText = `Heard: "${commandText}" — routing from your location...`;
+    } else {
+        console.warn('No GPS fix available yet, falling back to named routing.');
+        document.getElementById('status').innerText = `Heard: "${commandText}" — routing (no GPS fix yet)...`;
+    }
+
+    const response = await fetch('/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+    });
+    const data = await response.json();
+
+    if (data.error) {
+        document.getElementById('status').innerText = data.error;
+        speak(data.error);
+        return;
+    }
+
+    drawRoute(data.coordinates);
+    document.getElementById('status').innerText = data.spoken_reply;
+    startTrip(data);
+}
+
+// ---------- 5. Live GPS tracking ----------
+if ('geolocation' in navigator) {
+    navigator.geolocation.watchPosition(
+        (position) => {
+            lastKnownPosition = {
+                lat: position.coords.latitude,
+                lon: position.coords.longitude
+            };
+            handlePositionUpdate(position.coords.latitude, position.coords.longitude);
+            document.getElementById('status').innerText = 'GPS locked. Click the mic and say "ALPHA".';
+        },
+        (error) => {
+            console.warn('Geolocation error:', error.message);
+            document.getElementById('status').innerText = 'GPS timed out — will use named locations instead.';
+        },
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 }
+    );
+} else {
+    console.warn('Geolocation not supported in this browser.');
+    document.getElementById('status').innerText = 'Geolocation not supported — use named locations.';
+}
+
+
+// ---------- 6. Voice recognition -- always listening for "ALPHA", ----------
+// ---------- plus a manual mic button as an optional override.       ----------
+const micBtn = document.getElementById('mic-btn');
+const statusEl = document.getElementById('status');
+const WAKE_WORD = 'alpha';
+let mode = 'idle';
+let recognitionActive = false;
+
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognizer = new SpeechRecognition();
+    recognizer.lang = 'en-US';
+
+    statusEl.innerText = 'Say "ALPHA" any time, or tap the mic button.';
+
+    function startListening() {
+        if (recognitionActive) return;
+        try {
+            recognizer.start();
+            recognitionActive = true;
+        } catch (err) {
+            // start() can throw if called while already starting -- safe to ignore
+        }
+    }
+
+    function forceListenNow() {
+        // Manual override: stop whatever's happening and restart fresh,
+        // so the button always feels instantly responsive.
+        try { recognizer.stop(); } catch (err) { /* ignore if not running */ }
+        mode = 'idle';
+        statusEl.innerText = 'Listening for "ALPHA"...';
+        // onend (below) will fire after stop() and trigger a clean restart
+    }
+
+    // Auto-restart whenever recognition stops, so ALPHA is always listening
+    recognizer.onend = () => {
+        recognitionActive = false;
+        startListening();
+    };
+
+    micBtn.addEventListener('click', forceListenNow);
+
+    recognizer.onresult = async (event) => {
+    const spokenText = event.results[event.results.length - 1][0].transcript;
+    const lowerText = spokenText.toLowerCase();
+
+    // ---------- Special command: STOP NAVIGATION (works any time, any mode) ----------
+    if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
+        tripActive = false;
+        currentRoute = null;
+        currentStepIndex = 0;
+        mode = 'idle';
+        const message = 'Navigation stopped.';
+        statusEl.innerText = message;
+        speak(message);
+        return;
+    }
+
+    // ---------- Special command: HOW FAR IS THE DESTINATION (works any time) ----------
+    if (lowerText.includes('how far')) {
+        if (currentRoute && lastKnownPosition) {
+            const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
+            const remaining = L.latLng(lastKnownPosition.lat, lastKnownPosition.lon)
+                .distanceTo(L.latLng(destinationCoords[0], destinationCoords[1]));
+            const message = `You are about ${Math.round(remaining)} meters from your destination.`;
+            statusEl.innerText = message;
+            speak(message);
+        } else if (currentRoute) {
+            const message = `Your destination is about ${Math.round(currentRoute.distance_meters)} meters away in total.`;
+            statusEl.innerText = message;
+            speak(message);
+        } else {
+            const message = "You don't have an active destination right now.";
+            statusEl.innerText = message;
+            speak(message);
+        }
+        return;
+    }
+
+    // ---------- Normal wake-word / destination flow ----------
+    if (mode === 'idle') {
+        if (lowerText.includes(WAKE_WORD)) {
+            statusEl.innerText = 'Locating you...';
+
+            let greeting;
+            if (lastKnownPosition) {
+                try {
+                    const whereamiResponse = await fetch('/whereami', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_lat: lastKnownPosition.lat,
+                            user_lon: lastKnownPosition.lon
+                        })
+                    });
+                    const whereamiData = await whereamiResponse.json();
+                    greeting = `${whereamiData.spoken_reply} Where would you want me to take you today on South Campus?`;
+                } catch (err) {
+                    greeting = "Yes, where would you want me to take you today on South Campus?";
+                }
+            } else {
+                greeting = "Yes, where would you want me to take you today on South Campus?";
+            }
+
+            statusEl.innerText = greeting;
+            mode = 'awaiting_destination';
+            speak(greeting);
+        }
+        // Wake word not heard -- stay silent, keep listening in the background
+    } else if (mode === 'awaiting_destination') {
+        mode = 'idle';
+        sendCommand(spokenText);
+    }
+};
+    
+    recognizer.onerror = (event) => {
+        // "no-speech" and "aborted" fire constantly during always-on listening --
+        // these are expected, not real errors, so we don't alarm the user.
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+            console.warn('Mic error:', event.error);
+        }
+        recognitionActive = false;
+        // onend fires right after this and triggers the restart automatically
+    };
+
+    startListening();
+} else {
+    micBtn.disabled = true;
+    statusEl.innerText =
+        'Voice recognition not supported in this browser — use the dropdown or text box below.';
+}
+// ---------- 7. Text fallback ----------
+// ---------- 7. Text fallback ----------
+document.getElementById('text-btn').addEventListener('click', () => {
+    const text = document.getElementById('text-fallback').value;
+    if (!text) return;
+
+    const lowerText = text.toLowerCase();
+
+    if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
+        tripActive = false;
+        currentRoute = null;
+        currentStepIndex = 0;
+        const message = 'Navigation stopped.';
+        statusEl.innerText = message;
+        speak(message);
+        return;
+    }
+
+    if (lowerText.includes('how far')) {
+        if (currentRoute && lastKnownPosition) {
+            const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
+            const remaining = L.latLng(lastKnownPosition.lat, lastKnownPosition.lon)
+                .distanceTo(L.latLng(destinationCoords[0], destinationCoords[1]));
+            const message = `You are about ${Math.round(remaining)} meters from your destination.`;
+            statusEl.innerText = message;
+            speak(message);
+        } else if (currentRoute) {
+            const message = `Your destination is about ${Math.round(currentRoute.distance_meters)} meters away in total.`;
+            statusEl.innerText = message;
+            speak(message);
+        } else {
+            const message = "You don't have an active destination right now.";
+            statusEl.innerText = message;
+            speak(message);
+        }
+        return;
+    }
+
+    mode = 'idle';
+    sendCommand(text);
+});
+
+// ---------- 7b. Dropdown destination selector ----------
+document.getElementById('select-btn').addEventListener('click', () => {
+    const selectedName = document.getElementById('destination-select').value;
+    if (selectedName) {
+        mode = 'idle';
+        sendCommand(`take me to ${selectedName}`);
+    }
+});
+
+
+// ---------- 8. Coordinate calibration tool ----------
+// Click anywhere on the map to see its exact coordinates in the console
+// and as a temporary popup -- use this to re-verify/re-collect landmark
+// coordinates against the satellite imagery.
+map.on('click', (event) => {
+    const lat = event.latlng.lat.toFixed(5);
+    const lon = event.latlng.lng.toFixed(5);
+    console.log(`Clicked coordinates: (${lat}, ${lon})`);
+
+    L.popup()
+        .setLatLng(event.latlng)
+        .setContent(`Lat: ${lat}<br>Lon: ${lon}`)
+        .openOn(map);
+});
+</script>
+</body>
+</html>
