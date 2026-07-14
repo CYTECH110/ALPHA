@@ -441,6 +441,11 @@ map.on('click', (event) => {
         .setContent(`Lat: ${lat}<br>Lon: ${lon}`)
         .openOn(map);
 });
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/service-worker.js')
+        .then(() => console.log('Service worker registered'))
+        .catch((err) => console.warn('Service worker registration failed:', err));
+}
 </script>
 </body>
 </html>
