@@ -298,14 +298,20 @@ function startListening() {
     }
 }
 
-    function forceListenNow() {
-        // Manual override: stop whatever's happening and restart fresh,
-        // so the button always feels instantly responsive.
-        try { recognizer.stop(); } catch (err) { /* ignore if not running */ }
-        mode = 'idle';
-        statusEl.innerText = 'Listening for "ALPHA"...';
-        // onend (below) will fire after stop() and trigger a clean restart
-    }
+   function forceListenNow() {
+    // Manual override: stop whatever's happening, then explicitly
+    // start a fresh session -- doesn't rely on onend/auto-restart,
+    // so this works reliably on both desktop and mobile.
+    try { recognizer.stop(); } catch (err) { /* ignore if not running */ }
+    recognitionActive = false;
+    mode = 'idle';
+    statusEl.innerText = 'Listening for "ALPHA"...';
+
+    // Small delay lets the stop() fully settle before starting again,
+    // avoiding "already started" errors on some browsers.
+    clearTimeout(restartTimeout);
+    restartTimeout = setTimeout(startListening, 200);
+}
 
    recognizer.onend = () => {
     recognitionActive = false;
