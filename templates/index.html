@@ -222,27 +222,43 @@ async function sendCommand(commandText) {
 }
 
 // ---------- 5. Live GPS tracking ----------
+// ---------- 5. Live GPS tracking ----------
+// Only trust GPS fixes reasonably accurate for campus-scale navigation.
+// Poor WiFi/cell-based fixes can be off by hundreds of meters -- we
+// reject those and keep waiting for a better one instead of guiding
+// the user from a wrong location.
+const MAX_ACCEPTABLE_ACCURACY_METERS = 60;
+
 if ('geolocation' in navigator) {
     navigator.geolocation.watchPosition(
         (position) => {
+            const accuracy = position.coords.accuracy;
+
+            if (accuracy > MAX_ACCEPTABLE_ACCURACY_METERS) {
+                console.warn(`GPS fix too imprecise (±${Math.round(accuracy)}m), waiting for a better one.`);
+                document.getElementById('status').innerText =
+                    `Refining GPS location (currently ±${Math.round(accuracy)}m)...`;
+                return; // don't update lastKnownPosition with a bad fix
+            }
+
             lastKnownPosition = {
                 lat: position.coords.latitude,
                 lon: position.coords.longitude
             };
             handlePositionUpdate(position.coords.latitude, position.coords.longitude);
-            document.getElementById('status').innerText = 'GPS locked. Click the mic and say "ALPHA".';
+            document.getElementById('status').innerText =
+                `GPS locked (±${Math.round(accuracy)}m). Say "ALPHA" or tap Listen Now.`;
         },
         (error) => {
             console.warn('Geolocation error:', error.message);
             document.getElementById('status').innerText = 'GPS timed out — will use named locations instead.';
         },
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     );
 } else {
     console.warn('Geolocation not supported in this browser.');
     document.getElementById('status').innerText = 'Geolocation not supported — use named locations.';
 }
-
 
 // ---------- 6. Voice recognition -- always listening for "ALPHA", ----------
 // ---------- plus a manual mic button as an optional override.       ----------
