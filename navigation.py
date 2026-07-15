@@ -30,17 +30,32 @@ DETOUR_RATIO_LIMIT = 2.2
 DETOUR_EXTRA_METERS_LIMIT = 250
 
 
-def get_road_route(start_coords, destination_coords):
+def get_road_route(start_coords, destination_coords, via_points=None):
     """
-    Calls the OSRM public API to get a real walking route between two
-    (lat, lon) points, following actual mapped roads/paths. Returns
-    None if the request fails for any reason.
-    """
-    start_lat, start_lon = start_coords
-    dest_lat, dest_lon = destination_coords
+    Calls the OSRM public API for a real walking route. If via_points
+    is provided, OSRM is forced to route through those coordinates in
+    order (start -> via_points -> destination), keeping the route on
+    real mapped roads/paths instead of taking a long outer detour.
 
-    url = f"{OSRM_BASE_URL}/{start_lon},{start_lat};{dest_lon},{dest_lat}"
-    params = {"overview": "full", "geometries": "geojson"}
+    Uses a wide "radiuses" tolerance so OSRM can still snap a live GPS
+    point to the nearest known road/path even if the person is standing
+    somewhat off the mapped network (e.g. inside a building, on an
+    unmapped path) -- without this, OSRM silently fails to route from
+    such points and we'd incorrectly fall back to a straight line.
+    """
+    via_points = via_points or []
+    all_points = [start_coords] + via_points + [destination_coords]
+
+    coord_string = ";".join(f"{lon},{lat}" for lat, lon in all_points)
+    # Allow each point to snap to a road/path within 200 meters
+    radius_string = ";".join(["200"] * len(all_points))
+
+    url = f"{OSRM_BASE_URL}/{coord_string}"
+    params = {
+        "overview": "full",
+        "geometries": "geojson",
+        "radiuses": radius_string,
+    }
 
     try:
         response = requests.get(url, params=params, timeout=6)
@@ -48,6 +63,8 @@ def get_road_route(start_coords, destination_coords):
         data = response.json()
 
         if data.get("code") != "Ok" or not data.get("routes"):
+            print(f"[OSRM] Route request failed: code={data.get('code')}, "
+                  f"message={data.get('message', 'no message')}")
             return None
 
         route = data["routes"][0]
@@ -58,7 +75,8 @@ def get_road_route(start_coords, destination_coords):
 
         return {"waypoints": waypoints, "distance_meters": distance_meters}
 
-    except (requests.RequestException, KeyError, ValueError, IndexError):
+    except (requests.RequestException, KeyError, ValueError, IndexError) as e:
+        print(f"[OSRM] Request exception: {e}")
         return None
 
 
