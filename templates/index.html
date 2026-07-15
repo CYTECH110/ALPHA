@@ -222,13 +222,12 @@ async function sendCommand(commandText) {
 }
 
 // ---------- 5. Live GPS tracking ----------
-// ---------- 5. Live GPS tracking ----------
-// Only trust GPS fixes reasonably accurate for campus-scale navigation.
-// Poor WiFi/cell-based fixes can be off by hundreds of meters -- we
-// reject those and keep waiting for a better one instead of guiding
-// the user from a wrong location.
-const MAX_ACCEPTABLE_ACCURACY_METERS = 60;
-
+.
+// 100m comfortably accommodates laptop WiFi-based positioning (which
+// on campus with good WiFi coverage typically achieves 50-100m) while
+// still being precise enough to distinguish between campus buildings,
+// which are generally spaced further apart than this.
+const MAX_ACCEPTABLE_ACCURACY_METERS = 100;
 if ('geolocation' in navigator) {
     navigator.geolocation.watchPosition(
         (position) => {
