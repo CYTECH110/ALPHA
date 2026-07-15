@@ -323,19 +323,31 @@ function startListening() {
 };
 
     micBtn.addEventListener('click', forceListenNow);
+let silenceTimer = null;
+const SILENCE_DELAY_MS = 1200; // wait this long after speech stops before acting
 
-     
-    recognizer.onresult = async (event) => {
-    const lastResult = event.results[event.results.length - 1];
-
-    if (!lastResult.isFinal) {
-        return;
+recognizer.onresult = (event) => {
+    // Build the full transcript from ALL results so far (interim + final)
+    let fullTranscript = '';
+    for (let i = 0; i < event.results.length; i++) {
+        fullTranscript += event.results[i][0].transcript;
     }
+    const lowerText = fullTranscript.toLowerCase().trim();
 
-    const spokenText = lastResult[0].transcript;
-    const lowerText = spokenText.toLowerCase();
+    statusEl.innerText = `Hearing: "${fullTranscript}"...`;
 
-    // ---------- Special command: STOP NAVIGATION (works any time, any mode) ----------
+    // Reset the silence timer every time new speech comes in --
+    // only process the command once the person has actually paused.
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+        processFinalCommand(lowerText, fullTranscript);
+    }, SILENCE_DELAY_MS);
+};
+
+async function processFinalCommand(lowerText, originalText) {
+    if (!lowerText) return;
+
+    // ---------- Special command: STOP NAVIGATION ----------
     if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
         tripActive = false;
         currentRoute = null;
@@ -347,7 +359,7 @@ function startListening() {
         return;
     }
 
-    // ---------- Special command: HOW FAR IS THE DESTINATION (works any time) ----------
+    // ---------- Special command: HOW FAR ----------
     if (lowerText.includes('how far')) {
         if (currentRoute && lastKnownPosition) {
             const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
@@ -397,12 +409,13 @@ function startListening() {
             mode = 'awaiting_destination';
             speak(greeting);
         }
-        // Wake word not heard -- stay silent, keep listening in the background
     } else if (mode === 'awaiting_destination') {
         mode = 'idle';
-        sendCommand(spokenText);
+        sendCommand(originalText);
     }
-};
+}
+     
+   
     
     recognizer.onerror = (event) => {
         // "no-speech" and "aborted" fire constantly during always-on listening --
