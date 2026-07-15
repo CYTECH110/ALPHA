@@ -271,19 +271,25 @@ let recognitionActive = false;
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognizer = new SpeechRecognition();
-    recognizer.lang = 'en-US';
+   recognizer.lang = 'en-US';
+recognizer.continuous = true;      // keep each session open longer instead of ending after one phrase
+recognizer.interimResults = false; // only fire onresult for finished phrases, reduces restart churn
 
-    statusEl.innerText = 'Say "ALPHA" any time, or tap the mic button.';
+statusEl.innerText = 'Say "ALPHA" any time, or tap the mic button.';
 
-    function startListening() {
-        if (recognitionActive) return;
-        try {
-            recognizer.start();
-            recognitionActive = true;
-        } catch (err) {
-            // start() can throw if called while already starting -- safe to ignore
-        }
+let restartTimeout = null;
+
+function startListening() {
+    if (recognitionActive) return;
+    try {
+        recognizer.start();
+        recognitionActive = true;
+    } catch (err) {
+        // start() can throw if called while already starting -- retry shortly
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(startListening, 500);
     }
+}
 
     function forceListenNow() {
         // Manual override: stop whatever's happening and restart fresh,
@@ -295,10 +301,14 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     }
 
     // Auto-restart whenever recognition stops, so ALPHA is always listening
-    recognizer.onend = () => {
-        recognitionActive = false;
-        startListening();
-    };
+    // Auto-restart whenever recognition stops, so ALPHA is always listening.
+// A short delay avoids the mic visibly "flickering" on/off rapidly on
+// mobile Chrome, which naturally ends sessions every few seconds.
+recognizer.onend = () => {
+    recognitionActive = false;
+    clearTimeout(restartTimeout);
+    restartTimeout = setTimeout(startListening, 300);
+};
 
     micBtn.addEventListener('click', forceListenNow);
 
