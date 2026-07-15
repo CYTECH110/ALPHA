@@ -279,8 +279,8 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
 // Desktop keeps the always-on wake-word experience.
 const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-recognizer.continuous = !IS_MOBILE;
-recognizer.interimResults = false;
+recognizer.continuous = true;
+recognizer.interimResults = true;
 statusEl.innerText = 'Say "ALPHA" any time, or tap the mic button.';
 
 let restartTimeout = null;
@@ -324,8 +324,15 @@ function startListening() {
 
     micBtn.addEventListener('click', forceListenNow);
 
+     
     recognizer.onresult = async (event) => {
-    const spokenText = event.results[event.results.length - 1][0].transcript;
+    const lastResult = event.results[event.results.length - 1];
+
+    if (!lastResult.isFinal) {
+        return;
+    }
+
+    const spokenText = lastResult[0].transcript;
     const lowerText = spokenText.toLowerCase();
 
     // ---------- Special command: STOP NAVIGATION (works any time, any mode) ----------
