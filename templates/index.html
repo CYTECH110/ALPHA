@@ -271,10 +271,17 @@ let recognitionActive = false;
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognizer = new SpeechRecognition();
-   recognizer.lang = 'en-US';
-recognizer.continuous = true;      // keep each session open longer instead of ending after one phrase
-recognizer.interimResults = false; // only fire onresult for finished phrases, reduces restart churn
+  recognizer.lang = 'en-US';
 
+// Mobile Chrome aggressively kills long-running speech sessions,
+// causing visible mic on/off flickering no matter how the restart
+// timing is tuned. On mobile, we disable always-on auto-restart and
+// rely on the "Listen Now" button instead -- fully stable, no flicker.
+// Desktop keeps the always-on wake-word experience.
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+recognizer.continuous = !IS_MOBILE;
+recognizer.interimResults = false;
 statusEl.innerText = 'Say "ALPHA" any time, or tap the mic button.';
 
 let restartTimeout = null;
@@ -300,14 +307,14 @@ function startListening() {
         // onend (below) will fire after stop() and trigger a clean restart
     }
 
-    // Auto-restart whenever recognition stops, so ALPHA is always listening
-    // Auto-restart whenever recognition stops, so ALPHA is always listening.
-// A short delay avoids the mic visibly "flickering" on/off rapidly on
-// mobile Chrome, which naturally ends sessions every few seconds.
-recognizer.onend = () => {
+   recognizer.onend = () => {
     recognitionActive = false;
-    clearTimeout(restartTimeout);
-    restartTimeout = setTimeout(startListening, 300);
+    if (!IS_MOBILE) {
+        // Desktop: keep the always-on wake-word behavior
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(startListening, 300);
+    }
+    // Mobile: don't auto-restart -- wait for the user to tap "Listen Now"
 };
 
     micBtn.addEventListener('click', forceListenNow);
@@ -394,8 +401,11 @@ recognizer.onend = () => {
         recognitionActive = false;
         // onend fires right after this and triggers the restart automatically
     };
-
-    startListening();
+if (!IS_MOBILE) {
+    startListening(); // desktop starts listening automatically
+} else {
+    statusEl.innerText = 'Tap "Listen Now" and say "ALPHA" to begin.';
+}
 } else {
     micBtn.disabled = true;
     statusEl.innerText =
