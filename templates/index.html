@@ -407,23 +407,52 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
 }
 
 // =====================================================================
-// 9. TEXT BOX & DROPDOWN -- reuse the exact same processCommand logic
+// 9. TEXT BOX & DROPDOWN -- these bypass the wake-word gate entirely,
+//    since typing/selecting is already an explicit, deliberate action.
+//    Only "stop navigation" and "how far" are checked first; anything
+//    else is sent straight to sendCommand as a destination.
 // =====================================================================
+function handleManualInput(text) {
+    if (!text) return;
+    const lowerText = text.toLowerCase();
+
+    if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
+        tripActive = false;
+        currentRoute = null;
+        currentStepIndex = 0;
+        speak('Navigation stopped.');
+        return;
+    }
+
+    if (lowerText.includes('how far')) {
+        if (currentRoute && lastKnownPosition) {
+            const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
+            const remaining = L.latLng(lastKnownPosition.lat, lastKnownPosition.lon)
+                .distanceTo(L.latLng(destinationCoords[0], destinationCoords[1]));
+            speak(`You are about ${Math.round(remaining)} meters from your destination.`);
+        } else if (currentRoute) {
+            speak(`Your destination is about ${Math.round(currentRoute.distance_meters)} meters away in total.`);
+        } else {
+            speak("You don't have an active destination right now.");
+        }
+        return;
+    }
+
+    mode = 'idle';
+    sendCommand(text);
+}
+
 document.getElementById('text-btn').addEventListener('click', () => {
     const text = document.getElementById('text-fallback').value;
-    if (!text) return;
-    mode = 'idle';
-    processCommand(text.toLowerCase(), text);
+    handleManualInput(text);
 });
 
 document.getElementById('select-btn').addEventListener('click', () => {
     const selectedName = document.getElementById('destination-select').value;
-    if (!selectedName) return;
-    const commandText = `take me to ${selectedName}`;
-    mode = 'idle';
-    processCommand(commandText, commandText);
+    if (selectedName) {
+        handleManualInput(`take me to ${selectedName}`);
+    }
 });
-
 // =====================================================================
 // 10. COORDINATE CALIBRATION TOOL
 // =====================================================================
