@@ -5,25 +5,27 @@
 <title>ALPHA — UEW South Campus Voice Navigator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="/static/style.css" />
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#2563eb">
 <link rel="icon" href="/static/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
 
 <h2>🎓 ALPHA — UEW South Campus Voice Navigator</h2>
 
-<div id="map" style="height: 70vh; width: 100%;"></div>
+<div id="map" style="height: 60vh; width: 100%;"></div>
+
 <div id="controls">
-   <button id="mic-btn">🎤 Listen Now</button>
+    <button id="mic-btn">🎤 Listen Now</button>
     <p id="status">Waiting for GPS lock...</p>
 
     <div class="input-row">
         <select id="destination-select">
-            <option value="">-- Choose a destination from the main entrance --</option>
+            <option value="">-- Choose a destination --</option>
         </select>
         <button id="select-btn">Go</button>
     </div>
@@ -36,56 +38,33 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ---------- 1. Map setup ----------
+// =====================================================================
+// 1. MAP SETUP
+// =====================================================================
+const map = L.map('map').setView([5.3389, -0.6265], 16);
 
-// Bounding box calculated from all 22 surveyed coordinates:
-// Latitude range:  5.33758 (Winneba Guesthouse) to 5.34026 (Advance Park)
-// Longitude range: -0.63020 (Advance Park) to -0.62378 (Kwame Nkrumah Avenue)
-// Padded slightly on each side so no marker sits right on the edge.
-const CAMPUS_BOUNDS = [
-    [5.3355, -0.6320],   // south-west corner
-    [5.3420, -0.6220]    // north-east corner
-];
-
-const map = L.map('map', {
-    maxBounds: CAMPUS_BOUNDS,
-    maxBoundsViscosity: 1.0,  // hard wall -- can't drag/pan past the edge
-    minZoom: 15
-}).setView([5.3389, -0.6265], 16); // centered over all 22 locations
-
-map.setMaxBounds(CAMPUS_BOUNDS);
-
-// Satellite base layer (Esri World Imagery — free, no API key required)
 const satelliteLayer = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { attribution: 'Tiles &copy; Esri' }
 );
 
-// Standard street map layer (kept as an option too)
 const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
 });
 
-streetLayer.addTo(map); // street map loads by default (satellite has cert issues on some networks)
+streetLayer.addTo(map);
 
-// Adds a small layer-switcher control in the top-right of the map
 L.control.layers({
     "Satellite": satelliteLayer,
     "Street Map": streetLayer
 }).addTo(map);
 
-// Landmarks passed in from Flask (see app.py home() route)
 const landmarks = {{ landmarks | tojson }};
 for (const [name, coords] of Object.entries(landmarks)) {
     L.marker(coords).addTo(map).bindPopup(name);
 }
-// Populate the destination dropdown with every known landmark,
-// nicely capitalized, sorted alphabetically for easy scanning.
-// Populate the destination dropdown with every known landmark,
-// nicely capitalized, sorted alphabetically -- excluding locations
-// we don't want selectable from this menu.
-const EXCLUDED_FROM_DROPDOWN = ["advance park","mosque", "ict department"];
 
+const EXCLUDED_FROM_DROPDOWN = ["advance park", "mosque", "ict department"];
 
 const destinationSelect = document.getElementById('destination-select');
 const sortedLandmarkNames = Object.keys(landmarks)
@@ -95,7 +74,7 @@ const sortedLandmarkNames = Object.keys(landmarks)
 for (const name of sortedLandmarkNames) {
     const option = document.createElement('option');
     option.value = name;
-    option.textContent = name.replace(/\b\w/g, char => char.toUpperCase()); // Title Case
+    option.textContent = name.replace(/\b\w/g, char => char.toUpperCase());
     destinationSelect.appendChild(option);
 }
 
@@ -124,20 +103,51 @@ function updateUserMarker(lat, lon) {
     }
 }
 
-// ---------- 2. Text-to-speech ----------
-let recognizerRef = null; // set once the recognizer is created, below
+// =====================================================================
+// 2. SHARED STATE (declared early so every function below can see them)
+// =====================================================================
+const statusEl = document.getElementById('status');
+const micBtn = document.getElementById('mic-btn');
+const WAKE_WORD = 'alpha';
 
+let mode = 'idle';                 // 'idle' | 'awaiting_destination'
+let recognitionActive = false;
+let recognizerRef = null;          // set once the recognizer is created
+let restartTimeout = null;
+let silenceTimer = null;
+const SILENCE_DELAY_MS = 1200;
+
+let currentRoute = null;
+let currentStepIndex = 0;
+let tripActive = false;
+let lastKnownPosition = null;
+
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+// A single, reliable "start listening" function every other piece of
+// code calls -- avoids the double-declaration bugs from before.
+function startListening() {
+    if (!recognizerRef || recognitionActive) return;
+    try {
+        recognizerRef.start();
+        recognitionActive = true;
+    } catch (err) {
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(startListening, 500);
+    }
+}
+
+// =====================================================================
+// 3. TEXT-TO-SPEECH -- pauses the mic while ALPHA talks, then resumes
+// =====================================================================
 function speak(text) {
     if (recognizerRef) {
         try { recognizerRef.stop(); } catch (err) { /* ignore */ }
     }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.onend = () => {
-        // Resume listening only after ALPHA has finished talking
         clearTimeout(restartTimeout);
-        restartTimeout = setTimeout(() => {
-            if (recognizerRef) startListening();
-        }, 400);
+        restartTimeout = setTimeout(startListening, 400);
     };
     speechSynthesis.speak(utterance);
 }
@@ -154,11 +164,9 @@ function speakThen(text, callback) {
     speechSynthesis.speak(utterance);
 }
 
-// ---------- 3. Trip state & live guidance ----------
-let currentRoute = null;
-let currentStepIndex = 0;
-let tripActive = false;
-
+// =====================================================================
+// 4. TRIP STATE & LIVE GUIDANCE
+// =====================================================================
 function startTrip(routeData) {
     currentRoute = routeData;
     currentStepIndex = 1;
@@ -182,232 +190,117 @@ function handlePositionUpdate(lat, lon) {
         currentStepIndex++;
         if (currentStepIndex >= currentRoute.turn_instructions.length) {
             tripActive = false;
-            document.getElementById('status').innerText = 'Trip complete.';
+            statusEl.innerText = 'Trip complete.';
         }
     }
 }
 
-// ---------- 4. GPS position sharing ----------
-// watchPosition (below) continuously keeps this updated in the background.
-// Both the "you are here" dot AND the route requests reuse this same
-// value, instead of making a separate, slower GPS request each time.
-let lastKnownPosition = null;
+// =====================================================================
+// 5. GPS TRACKING
+// =====================================================================
+const MAX_ACCEPTABLE_ACCURACY_METERS = 100;
 
-// Wraps the browser's one-time location API in a Promise (kept as a
-// fallback for the wake-word "where am I" check, which wants a fresh fix).
-function getCurrentPosition() {
-    return new Promise((resolve, reject) => {
-        if (!('geolocation' in navigator)) {
-            reject(new Error('Geolocation not supported'));
-            return;
-        }
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 20000,
-            maximumAge: 30000
-        });
-    });
+if ('geolocation' in navigator) {
+    navigator.geolocation.watchPosition(
+        (position) => {
+            const accuracy = position.coords.accuracy;
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+
+            handlePositionUpdate(lat, lon); // always show the dot
+
+            if (accuracy > MAX_ACCEPTABLE_ACCURACY_METERS) {
+                console.warn(`GPS fix imprecise (±${Math.round(accuracy)}m).`);
+                statusEl.innerText = `Location shown (±${Math.round(accuracy)}m, refining). Say "ALPHA" to begin.`;
+                return;
+            }
+
+            lastKnownPosition = { lat, lon };
+            statusEl.innerText = `GPS locked (±${Math.round(accuracy)}m). Say "ALPHA" or tap Listen Now.`;
+        },
+        (error) => {
+            console.warn('Geolocation error:', error.message);
+            statusEl.innerText = 'GPS unavailable — you can still use named locations below.';
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+    );
+} else {
+    statusEl.innerText = 'Geolocation not supported — use named locations below.';
 }
 
+// =====================================================================
+// 6. SEND A DESTINATION COMMAND TO THE BACKEND
+// =====================================================================
 async function sendCommand(commandText) {
     let requestBody = { command: commandText };
 
     if (lastKnownPosition) {
         requestBody.user_lat = lastKnownPosition.lat;
         requestBody.user_lon = lastKnownPosition.lon;
-        document.getElementById('status').innerText = `Heard: "${commandText}" — routing from your location...`;
+        statusEl.innerText = `Heard: "${commandText}" — routing from your location...`;
     } else {
-        console.warn('No GPS fix available yet, falling back to named routing.');
-        document.getElementById('status').innerText = `Heard: "${commandText}" — routing (no GPS fix yet)...`;
+        statusEl.innerText = `Heard: "${commandText}" — routing...`;
     }
 
-    const response = await fetch('/route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-    });
-    const data = await response.json();
-
-    if (data.error) {
-        document.getElementById('status').innerText = data.error;
-        speak(data.error);
-        return;
-    }
-
-    drawRoute(data.coordinates);
-    document.getElementById('status').innerText = data.spoken_reply;
-    startTrip(data);
-}
-
-// ---------- 5. Live GPS tracking ----------
-
-// 100m comfortably accommodates laptop WiFi-based positioning (which
-// on campus with good WiFi coverage typically achieves 50-100m) while
-// still being precise enough to distinguish between campus buildings,
-// which are generally spaced further apart than this.
-const MAX_ACCEPTABLE_ACCURACY_METERS = 100;
-if ('geolocation' in navigator) {
-    navigator.geolocation.watchPosition(
-        (position) => {
-            const accuracy = position.coords.accuracy;
-
-            if (accuracy > MAX_ACCEPTABLE_ACCURACY_METERS) {
-                console.warn(`GPS fix too imprecise (±${Math.round(accuracy)}m), waiting for a better one.`);
-                document.getElementById('status').innerText =
-                    `Refining GPS location (currently ±${Math.round(accuracy)}m)...`;
-                return; // don't update lastKnownPosition with a bad fix
-            }
-
-            lastKnownPosition = {
-                lat: position.coords.latitude,
-                lon: position.coords.longitude
-            };
-            handlePositionUpdate(position.coords.latitude, position.coords.longitude);
-            document.getElementById('status').innerText =
-                `GPS locked (±${Math.round(accuracy)}m). Say "ALPHA" or tap Listen Now.`;
-        },
-        (error) => {
-            console.warn('Geolocation error:', error.message);
-            document.getElementById('status').innerText = 'GPS timed out — will use named locations instead.';
-        },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
-    );
-} else {
-    console.warn('Geolocation not supported in this browser.');
-    document.getElementById('status').innerText = 'Geolocation not supported — use named locations.';
-}
-
-// ---------- 6. Voice recognition -- always listening for "ALPHA", ----------
-// ---------- plus a manual mic button as an optional override.       ----------
-const micBtn = document.getElementById('mic-btn');
-const statusEl = document.getElementById('status');
-const WAKE_WORD = 'alpha';
-let mode = 'idle';
-let recognitionActive = false;
-
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognizer = new SpeechRecognition();
-    recognizerRef = recognizer; 
-  recognizer.lang = 'en-US';
-
-const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-recognizer.continuous = true;
-recognizer.interimResults = true;
-statusEl.innerText = 'Say "ALPHA" any time, or tap the mic button.';
-
-let restartTimeout = null;
-
-function startListening() {
-    if (recognitionActive) return;
     try {
-        recognizer.start();
-        recognitionActive = true;
+        const response = await fetch('/route', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        const data = await response.json();
+
+        if (data.error) {
+            statusEl.innerText = data.error;
+            speak(data.error);
+            return;
+        }
+
+        drawRoute(data.coordinates);
+        statusEl.innerText = data.spoken_reply;
+        startTrip(data);
     } catch (err) {
-        // start() can throw if called while already starting -- retry shortly
+        console.warn('Route request failed:', err);
+        statusEl.innerText = 'Something went wrong reaching ALPHA. Please try again.';
+        // Still resume listening even after a network failure
         clearTimeout(restartTimeout);
         restartTimeout = setTimeout(startListening, 500);
     }
 }
 
-   function forceListenNow() {
-    // Manual override: stop whatever's happening, then explicitly
-    // start a fresh session -- doesn't rely on onend/auto-restart,
-    // so this works reliably on both desktop and mobile.
-    try { recognizer.stop(); } catch (err) { /* ignore if not running */ }
-    recognitionActive = false;
-    mode = 'idle';
-    statusEl.innerText = 'Listening for "ALPHA"...';
-
-    // Small delay lets the stop() fully settle before starting again,
-    // avoiding "already started" errors on some browsers.
-    clearTimeout(restartTimeout);
-    restartTimeout = setTimeout(startListening, 200);
-}
-
- recognizer.onend = () => {
-    recognitionActive = false;
-
-    // Don't auto-restart if we're mid-speech -- speak()/speakThen()
-    // will handle restarting once ALPHA finishes talking, to avoid
-    // the mic picking up ALPHA's own voice and re-triggering itself.
-    if (speechSynthesis.speaking) {
-        return;
-    }
-
-    if (!IS_MOBILE) {
-        clearTimeout(restartTimeout);
-        restartTimeout = setTimeout(startListening, 300);
-    } else if (mode === 'awaiting_destination') {
-        clearTimeout(restartTimeout);
-        restartTimeout = setTimeout(startListening, 300);
-    }
-};
-
-    micBtn.addEventListener('click', forceListenNow);
-let silenceTimer = null;
-const SILENCE_DELAY_MS = 1200; // wait this long after speech stops before acting
-
-recognizer.onresult = (event) => {
-   let silenceTimer = null;
-const SILENCE_DELAY_MS = 1200; // wait this long after speech stops before acting
-
-recognizer.onresult = (event) => {
-    // Build the full transcript from ALL results so far (interim + final)
-    let fullTranscript = '';
-    for (let i = 0; i < event.results.length; i++) {
-        fullTranscript += event.results[i][0].transcript;
-    }
-    const lowerText = fullTranscript.toLowerCase().trim();
-
-    statusEl.innerText = `Hearing: "${fullTranscript}"...`;
-
-    // Reset the silence timer every time new speech comes in --
-    // only process the command once the person has actually paused.
-    clearTimeout(silenceTimer);
-    silenceTimer = setTimeout(() => {
-        processFinalCommand(lowerText, fullTranscript);
-    }, SILENCE_DELAY_MS);
-};
-
-async function processFinalCommand(lowerText, originalText) {
+// =====================================================================
+// 7. COMMAND PROCESSING -- the single source of truth for every command,
+//    used identically whether it came from voice, text box, or dropdown.
+// =====================================================================
+async function processCommand(lowerText, originalText) {
     if (!lowerText) return;
 
-    // ---------- Special command: STOP NAVIGATION ----------
+    // ---------- STOP NAVIGATION ----------
     if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
         tripActive = false;
         currentRoute = null;
         currentStepIndex = 0;
         mode = 'idle';
-        const message = 'Navigation stopped.';
-        statusEl.innerText = message;
-        speak(message);
+        speak('Navigation stopped.');
         return;
     }
 
-    // ---------- Special command: HOW FAR ----------
+    // ---------- HOW FAR ----------
     if (lowerText.includes('how far')) {
         if (currentRoute && lastKnownPosition) {
             const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
             const remaining = L.latLng(lastKnownPosition.lat, lastKnownPosition.lon)
                 .distanceTo(L.latLng(destinationCoords[0], destinationCoords[1]));
-            const message = `You are about ${Math.round(remaining)} meters from your destination.`;
-            statusEl.innerText = message;
-            speak(message);
+            speak(`You are about ${Math.round(remaining)} meters from your destination.`);
         } else if (currentRoute) {
-            const message = `Your destination is about ${Math.round(currentRoute.distance_meters)} meters away in total.`;
-            statusEl.innerText = message;
-            speak(message);
+            speak(`Your destination is about ${Math.round(currentRoute.distance_meters)} meters away in total.`);
         } else {
-            const message = "You don't have an active destination right now.";
-            statusEl.innerText = message;
-            speak(message);
+            speak("You don't have an active destination right now.");
         }
         return;
     }
 
-    // ---------- Normal wake-word / destination flow ----------
+    // ---------- WAKE WORD / DESTINATION FLOW ----------
     if (mode === 'idle') {
         if (lowerText.includes(WAKE_WORD)) {
             statusEl.innerText = 'Locating you...';
@@ -432,128 +325,108 @@ async function processFinalCommand(lowerText, originalText) {
                 greeting = "Yes, where would you want me to take you today on South Campus?";
             }
 
-            statusEl.innerText = greeting;
             mode = 'awaiting_destination';
-            speak(greeting);
+            speak(greeting); // mic auto-resumes after this via speak()'s onend handler
         }
+        // Wake word not heard -- silently keep listening, no status spam
     } else if (mode === 'awaiting_destination') {
         mode = 'idle';
         sendCommand(originalText);
     }
 }
 
-    // ---------- Normal wake-word / destination flow ----------
-    if (mode === 'idle') {
-        if (lowerText.includes(WAKE_WORD)) {
-            statusEl.innerText = 'Locating you...';
+// =====================================================================
+// 8. VOICE RECOGNITION SETUP
+// =====================================================================
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognizer = new SpeechRecognition();
+    recognizerRef = recognizer;
 
-            let greeting;
-            if (lastKnownPosition) {
-                try {
-                    const whereamiResponse = await fetch('/whereami', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            user_lat: lastKnownPosition.lat,
-                            user_lon: lastKnownPosition.lon
-                        })
-                    });
-                    const whereamiData = await whereamiResponse.json();
-                    greeting = `${whereamiData.spoken_reply} Where would you want me to take you today on South Campus?`;
-                } catch (err) {
-                    greeting = "Yes, where would you want me to take you today on South Campus?";
-                }
-            } else {
-                greeting = "Yes, where would you want me to take you today on South Campus?";
-            }
+    recognizer.lang = 'en-US';
+    recognizer.continuous = true;
+    recognizer.interimResults = true;
 
-            statusEl.innerText = greeting;
-            mode = 'awaiting_destination';
-            speak(greeting);
-        }
-    } else if (mode === 'awaiting_destination') {
+    function forceListenNow() {
+        try { recognizer.stop(); } catch (err) { /* ignore if not running */ }
+        recognitionActive = false;
         mode = 'idle';
-        sendCommand(originalText);
+        statusEl.innerText = 'Listening for "ALPHA"...';
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(startListening, 200);
     }
-}
-     
-   
-    
+
+    micBtn.addEventListener('click', forceListenNow);
+
+    recognizer.onend = () => {
+        recognitionActive = false;
+
+        // If ALPHA is currently speaking, speak()'s own onend handler
+        // will restart listening once playback finishes -- don't race it.
+        if (speechSynthesis.speaking) return;
+
+        // Otherwise, always keep listening -- on both desktop and
+        // mobile -- so the mic genuinely stays "always on."
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(startListening, 300);
+    };
+
+    recognizer.onresult = (event) => {
+        let fullTranscript = '';
+        for (let i = 0; i < event.results.length; i++) {
+            fullTranscript += event.results[i][0].transcript;
+        }
+        const lowerText = fullTranscript.toLowerCase().trim();
+
+        if (lowerText) {
+            statusEl.innerText = `Hearing: "${fullTranscript}"...`;
+        }
+
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+            processCommand(lowerText, fullTranscript);
+        }, SILENCE_DELAY_MS);
+    };
+
     recognizer.onerror = (event) => {
-        // "no-speech" and "aborted" fire constantly during always-on listening --
-        // these are expected, not real errors, so we don't alarm the user.
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
             console.warn('Mic error:', event.error);
         }
         recognitionActive = false;
-        // onend fires right after this and triggers the restart automatically
+        // onend fires right after this and triggers the restart above
     };
-if (!IS_MOBILE) {
-    startListening(); // desktop starts listening automatically
-} else {
-    statusEl.innerText = 'Tap "Listen Now" and say "ALPHA" to begin.';
-}
+
+    // Start listening immediately on load -- on BOTH desktop and mobile.
+    // The "Listen Now" button remains available as a manual reset if
+    // the mic ever needs a fresh nudge (e.g. after a permissions change).
+    startListening();
 } else {
     micBtn.disabled = true;
     statusEl.innerText =
         'Voice recognition not supported in this browser — use the dropdown or text box below.';
 }
-// ---------- 7. Text fallback ----------
-// ---------- 7. Text fallback ----------
+
+// =====================================================================
+// 9. TEXT BOX & DROPDOWN -- reuse the exact same processCommand logic
+// =====================================================================
 document.getElementById('text-btn').addEventListener('click', () => {
     const text = document.getElementById('text-fallback').value;
     if (!text) return;
-
-    const lowerText = text.toLowerCase();
-
-    if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
-        tripActive = false;
-        currentRoute = null;
-        currentStepIndex = 0;
-        const message = 'Navigation stopped.';
-        statusEl.innerText = message;
-        speak(message);
-        return;
-    }
-
-    if (lowerText.includes('how far')) {
-        if (currentRoute && lastKnownPosition) {
-            const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
-            const remaining = L.latLng(lastKnownPosition.lat, lastKnownPosition.lon)
-                .distanceTo(L.latLng(destinationCoords[0], destinationCoords[1]));
-            const message = `You are about ${Math.round(remaining)} meters from your destination.`;
-            statusEl.innerText = message;
-            speak(message);
-        } else if (currentRoute) {
-            const message = `Your destination is about ${Math.round(currentRoute.distance_meters)} meters away in total.`;
-            statusEl.innerText = message;
-            speak(message);
-        } else {
-            const message = "You don't have an active destination right now.";
-            statusEl.innerText = message;
-            speak(message);
-        }
-        return;
-    }
-
     mode = 'idle';
-    sendCommand(text);
+    processCommand(text.toLowerCase(), text);
 });
 
-// ---------- 7b. Dropdown destination selector ----------
 document.getElementById('select-btn').addEventListener('click', () => {
     const selectedName = document.getElementById('destination-select').value;
-    if (selectedName) {
-        mode = 'idle';
-        sendCommand(`take me to ${selectedName}`);
-    }
+    if (!selectedName) return;
+    const commandText = `take me to ${selectedName}`;
+    mode = 'idle';
+    processCommand(commandText, commandText);
 });
 
-
-// ---------- 8. Coordinate calibration tool ----------
-// Click anywhere on the map to see its exact coordinates in the console
-// and as a temporary popup -- use this to re-verify/re-collect landmark
-// coordinates against the satellite imagery.
+// =====================================================================
+// 10. COORDINATE CALIBRATION TOOL
+// =====================================================================
 map.on('click', (event) => {
     const lat = event.latlng.lat.toFixed(5);
     const lon = event.latlng.lng.toFixed(5);
@@ -564,6 +437,10 @@ map.on('click', (event) => {
         .setContent(`Lat: ${lat}<br>Lon: ${lon}`)
         .openOn(map);
 });
+
+// =====================================================================
+// 11. SERVICE WORKER REGISTRATION
+// =====================================================================
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/static/service-worker.js')
         .then(() => console.log('Service worker registered'))
