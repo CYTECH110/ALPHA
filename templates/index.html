@@ -350,6 +350,10 @@ let silenceTimer = null;
 const SILENCE_DELAY_MS = 1200; // wait this long after speech stops before acting
 
 recognizer.onresult = (event) => {
+   let silenceTimer = null;
+const SILENCE_DELAY_MS = 1200; // wait this long after speech stops before acting
+
+recognizer.onresult = (event) => {
     // Build the full transcript from ALL results so far (interim + final)
     let fullTranscript = '';
     for (let i = 0; i < event.results.length; i++) {
@@ -402,6 +406,41 @@ async function processFinalCommand(lowerText, originalText) {
         }
         return;
     }
+
+    // ---------- Normal wake-word / destination flow ----------
+    if (mode === 'idle') {
+        if (lowerText.includes(WAKE_WORD)) {
+            statusEl.innerText = 'Locating you...';
+
+            let greeting;
+            if (lastKnownPosition) {
+                try {
+                    const whereamiResponse = await fetch('/whereami', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_lat: lastKnownPosition.lat,
+                            user_lon: lastKnownPosition.lon
+                        })
+                    });
+                    const whereamiData = await whereamiResponse.json();
+                    greeting = `${whereamiData.spoken_reply} Where would you want me to take you today on South Campus?`;
+                } catch (err) {
+                    greeting = "Yes, where would you want me to take you today on South Campus?";
+                }
+            } else {
+                greeting = "Yes, where would you want me to take you today on South Campus?";
+            }
+
+            statusEl.innerText = greeting;
+            mode = 'awaiting_destination';
+            speak(greeting);
+        }
+    } else if (mode === 'awaiting_destination') {
+        mode = 'idle';
+        sendCommand(originalText);
+    }
+}
 
     // ---------- Normal wake-word / destination flow ----------
     if (mode === 'idle') {
