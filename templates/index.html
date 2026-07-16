@@ -125,14 +125,32 @@ function updateUserMarker(lat, lon) {
 }
 
 // ---------- 2. Text-to-speech ----------
+let recognizerRef = null; // set once the recognizer is created, below
+
 function speak(text) {
+    if (recognizerRef) {
+        try { recognizerRef.stop(); } catch (err) { /* ignore */ }
+    }
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => {
+        // Resume listening only after ALPHA has finished talking
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(() => {
+            if (recognizerRef) startListening();
+        }, 400);
+    };
     speechSynthesis.speak(utterance);
 }
 
 function speakThen(text, callback) {
+    if (recognizerRef) {
+        try { recognizerRef.stop(); } catch (err) { /* ignore */ }
+    }
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = callback;
+    utterance.onend = () => {
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(callback, 400);
+    };
     speechSynthesis.speak(utterance);
 }
 
@@ -270,13 +288,9 @@ let recognitionActive = false;
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognizer = new SpeechRecognition();
+    recognizerRef = recognizer; 
   recognizer.lang = 'en-US';
 
-// Mobile Chrome aggressively kills long-running speech sessions,
-// causing visible mic on/off flickering no matter how the restart
-// timing is tuned. On mobile, we disable always-on auto-restart and
-// rely on the "Listen Now" button instead -- fully stable, no flicker.
-// Desktop keeps the always-on wake-word experience.
 const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 recognizer.continuous = true;
@@ -312,14 +326,23 @@ function startListening() {
     restartTimeout = setTimeout(startListening, 200);
 }
 
-   recognizer.onend = () => {
+ recognizer.onend = () => {
     recognitionActive = false;
+
+    // Don't auto-restart if we're mid-speech -- speak()/speakThen()
+    // will handle restarting once ALPHA finishes talking, to avoid
+    // the mic picking up ALPHA's own voice and re-triggering itself.
+    if (speechSynthesis.speaking) {
+        return;
+    }
+
     if (!IS_MOBILE) {
-        // Desktop: keep the always-on wake-word behavior
+        clearTimeout(restartTimeout);
+        restartTimeout = setTimeout(startListening, 300);
+    } else if (mode === 'awaiting_destination') {
         clearTimeout(restartTimeout);
         restartTimeout = setTimeout(startListening, 300);
     }
-    // Mobile: don't auto-restart -- wait for the user to tap "Listen Now"
 };
 
     micBtn.addEventListener('click', forceListenNow);
