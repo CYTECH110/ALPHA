@@ -27,16 +27,34 @@
         <button class="menu-item" data-panel="panel-language">🌐 Languages</button>
         <button class="menu-item" data-panel="panel-history">🕑 Map History</button>
 
-        <div id="panel-commands" class="menu-panel">
-            <h3>Voice Commands</h3>
-            <ul>
-                <li><strong>"ALPHA"</strong> — wakes ALPHA up</li>
-                <li><strong>"Take me to [place]"</strong> — routes to a destination</li>
-                <li><strong>"Take me from [A] to [B]"</strong> — routes between two named places</li>
-                <li><strong>"Stop navigation"</strong> — cancels the active trip</li>
-                <li><strong>"How far is the destination"</strong> — speaks remaining distance</li>
-            </ul>
-        </div>
+      <div id="panel-commands" class="menu-panel">
+    <h3>Voice Commands</h3>
+
+    <p><strong>English</strong></p>
+    <ul>
+        <li>"ALPHA" — wakes ALPHA up</li>
+        <li>"Take me to [place]" — routes to a destination</li>
+        <li>"Take me from [A] to [B]" — routes between two places</li>
+        <li>"Stop navigation" — cancels the active trip</li>
+        <li>"How far is the destination" — remaining distance</li>
+    </ul>
+
+    <p><strong>Français (French)</strong></p>
+    <ul>
+        <li>"ALPHA" — réveille ALPHA</li>
+        <li>"Emmène-moi à [lieu]" — itinéraire vers une destination</li>
+        <li>"Arrête la navigation" — annule le trajet en cours</li>
+        <li>"À quelle distance" — distance restante</li>
+    </ul>
+
+    <p><strong>Fante</strong> <em>(best-effort translations — accuracy may vary)</em></p>
+    <ul>
+        <li>"ALPHA" — nkae ALPHA</li>
+        <li>"Fa me kɔ [beaeɛ]" — kɔ baabi</li>
+        <li>"Gyae kwan" — gyae akwantuo no</li>
+        <li>"Ntam wo he" — akwantuo no ho ntam</li>
+    </ul>
+</div>
 
         <div id="panel-share" class="menu-panel">
             <h3>Share Your Location</h3>
@@ -279,11 +297,19 @@ function applyLanguage(langCode) {
     micBtn.textContent = t.micBtn;
     languageNoteEl.textContent = t.note;
 
-    if (recognizerRef) {
-        recognizerRef.lang = langCode === 'fr' ? 'fr-FR' : 'en-US'; // Fante falls back to English recognition
-    }
-    window.ALPHA_SPEECH_LANG = langCode === 'fr' ? 'fr-FR' : 'en-US'; // used by speak()
+   
+    let speechLang = 'en-US';
+    if (langCode === 'fr') speechLang = 'fr-FR';
+    if (langCode === 'fat') speechLang = 'ak-GH';
 
+   if (recognizerRef) {
+    recognizerRef.lang = speechLang;
+    try { recognizerRef.stop(); } catch (err) { /* ignore */ }
+    recognitionActive = false;
+    clearTimeout(restartTimeout);
+    restartTimeout = setTimeout(startListening, 300);
+}
+    window.ALPHA_SPEECH_LANG = speechLang;
     localStorage.setItem('alpha-language', langCode);
 }
 
@@ -510,7 +536,10 @@ async function processCommand(lowerText, originalText) {
     if (!lowerText) return;
 
     // ---------- STOP NAVIGATION ----------
-    if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation')) {
+// ---------- STOP NAVIGATION (English / French / Fante) ----------
+    if (lowerText.includes('stop navigation') || lowerText.includes('stop the navigation') ||
+        lowerText.includes('arrete la navigation') || lowerText.includes('arreter la navigation') ||
+        lowerText.includes('gyae kwan')) { 
         tripActive = false;
         currentRoute = null;
         currentStepIndex = 0;
@@ -519,8 +548,9 @@ async function processCommand(lowerText, originalText) {
         return;
     }
 
-    // ---------- HOW FAR ----------
-    if (lowerText.includes('how far')) {
+    // ---------- HOW FAR (English / French / Fante) ----------
+    if (lowerText.includes('how far') || lowerText.includes('a quelle distance') ||
+        lowerText.includes('c\'est loin') || lowerText.includes('ntam wo he')) {
         if (currentRoute && lastKnownPosition) {
             const destinationCoords = currentRoute.coordinates[currentRoute.coordinates.length - 1];
             const remaining = L.latLng(lastKnownPosition.lat, lastKnownPosition.lon)

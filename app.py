@@ -8,23 +8,49 @@ user's real live GPS location, or from a named starting point.
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from navigation import find_route, find_route_from_coords, find_nearest_landmark, START_POINT
-from campus_data import CAMPUS_LOCATIONS
+from campus_data import CAMPUS_LOCATIONS, LANDMARK_ALIASES
 
 app = Flask(__name__)
 CORS(app)
 
 
-def find_landmarks_in_text(text: str):
-    """Returns every known landmark mentioned in the text, in order."""
+import unicodedata
+
+
+def normalize_text(text: str) -> str:
+    """Lowercases and strips accents, so 'bibliothèque' and
+    'bibliotheque' both match, regardless of whether speech recognition
+    or a keyboard produced the accented version."""
     text = text.lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text
+
+
+def find_landmarks_in_text(text: str):
+    """
+    Returns every known landmark mentioned in the text, in order.
+    Checks the canonical English names AND any French/Fante aliases
+    from LANDMARK_ALIASES, so a command in either language resolves
+    to the correct location.
+    """
+    normalized_text = normalize_text(text)
     matches = []
 
-    for landmark_name in sorted(CAMPUS_LOCATIONS, key=len, reverse=True):
-        idx = text.find(landmark_name)
+    # Build one combined lookup: alias/name -> canonical key,
+    # longest-first so multi-word names match before shorter overlaps.
+    all_candidates = {name: name for name in CAMPUS_LOCATIONS}
+    for alias, canonical in LANDMARK_ALIASES.items():
+        all_candidates[normalize_text(alias)] = canonical
+
+    for candidate in sorted(all_candidates, key=len, reverse=True):
+        normalized_candidate = normalize_text(candidate)
+        idx = normalized_text.find(normalized_candidate)
         if idx != -1:
-            already_covered = any(landmark_name in existing for existing in matches)
+            canonical = all_candidates[candidate]
+            already_covered = any(canonical in existing for existing in matches)
             if not already_covered:
-                matches.append(landmark_name)
+                matches.append(canonical)
 
     return matches
 

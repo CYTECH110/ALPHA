@@ -43,6 +43,41 @@ CAMPUS_LOCATIONS = {
     "school of business":         (5.33865, -0.62499),
 }
 
+
+# Alternate names (French, and a starter set of Fante terms) that map
+# back to the canonical English key in CAMPUS_LOCATIONS. French entries
+# are reasonably reliable; Fante entries are a best-effort starting
+# point and should be reviewed/corrected by a native speaker -- they
+# are clearly marked as such so nobody mistakes them for verified.
+LANDMARK_ALIASES = {
+    # ---------- French (fr) ----------
+    "bibliotheque": "library",
+    "la bibliotheque": "library",
+    "entree": "entrance",
+    "entree principale": "entrance",
+    "marche": "south market",
+    "clinique": "clinic",
+    "mosquee": "mosque",
+    "salle d'assemblee": "assembly hall",
+    "bureau d'assurance sante": "health insurance office",
+    "unite de transport": "transport unit",
+    "auberge winneba": "winneba guesthouse",
+    "departement des sciences": "science department",
+    "ecole de commerce": "school of business",
+    "departement de francais": "french department",
+    "terrain de volleyball": "volleyball court",
+    "avenue kwame nkrumah": "kwame nkrumah avenue",
+    "rue de l'universite": "university street",
+    "parc advance": "advance park",
+
+    # ---------- Fante (fat) -- STARTER SET, NEEDS NATIVE SPEAKER REVIEW ----------
+    "nwomakorabea": "library",     # "book house" -- approximate
+    "kwanano": "entrance",         # "road entrance" -- approximate
+    "gua": "south market",         # "market" -- approximate
+    "ayaresabea": "clinic",        # "place of healing" -- approximate
+}
+
+
 # For destinations that OSRM incorrectly routes to via the long outer
 # public road loop (due to missing internal footpath data), these
 # waypoints force the route back through University Street -- the real,
