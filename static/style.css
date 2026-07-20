@@ -142,3 +142,114 @@ body.dark-mode #theme-toggle-btn {
 body.dark-mode #map {
     filter: brightness(0.85) contrast(1.05); /* subtly dims the map tiles to fit dark mode */
 }
+/* ---------- Hamburger menu ---------- */
+#hamburger-btn {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 1000;
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+    cursor: pointer;
+}
+
+#menu-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1001;
+}
+
+#menu-overlay.open {
+    display: block;
+}
+
+#menu-drawer {
+    position: fixed;
+    top: 0; left: 0;
+    width: 280px;
+    max-width: 85vw;
+    height: 100%;
+    background: white;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.3);
+    padding: 20px;
+    overflow-y: auto;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+}
+
+#menu-overlay.open #menu-drawer {
+    transform: translateX(0);
+}
+
+body.dark-mode #menu-drawer {
+    background: #1e1e1e;
+    color: #f1f1f1;
+}
+
+.menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 14px 8px;
+    font-size: 16px;
+    border-bottom: 1px solid #e5e7eb;
+    cursor: pointer;
+}
+
+body.dark-mode .menu-item {
+    border-bottom: 1px solid #3f3f46;
+    color: #f1f1f1;
+}
+
+.menu-panel {
+    display: none;
+    padding-top: 15px;
+}
+
+.menu-panel.active {
+    display: block;
+}
+
+.menu-panel h3 {
+    margin-top: 0;
+}
+
+.menu-panel ul {
+    padding-left: 20px;
+}
+
+.menu-panel li {
+    margin-bottom: 8px;
+}
+
+#close-menu-btn {
+    float: right;
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: inherit;
+}
+
+.history-entry {
+    padding: 8px;
+    border-bottom: 1px solid #e5e7eb;
+    cursor: pointer;
+}
+
+.history-entry:hover {
+    background-color: #f3f4f6;
+}
+
+body.dark-mode .history-entry:hover {
+    background-color: #2a2a2a;
+}

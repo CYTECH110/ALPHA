@@ -15,9 +15,55 @@
 </head>
 <body>
 
+<button id="hamburger-btn">☰</button>
+
+<div id="menu-overlay">
+    <div id="menu-drawer">
+        <button id="close-menu-btn">✕</button>
+        <h3>ALPHA Menu</h3>
+
+        <button class="menu-item" data-panel="panel-commands">📋 Commands</button>
+        <button class="menu-item" data-panel="panel-share">📍 Share Location</button>
+        <button class="menu-item" data-panel="panel-language">🌐 Languages</button>
+        <button class="menu-item" data-panel="panel-history">🕑 Map History</button>
+
+        <div id="panel-commands" class="menu-panel">
+            <h3>Voice Commands</h3>
+            <ul>
+                <li><strong>"ALPHA"</strong> — wakes ALPHA up</li>
+                <li><strong>"Take me to [place]"</strong> — routes to a destination</li>
+                <li><strong>"Take me from [A] to [B]"</strong> — routes between two named places</li>
+                <li><strong>"Stop navigation"</strong> — cancels the active trip</li>
+                <li><strong>"How far is the destination"</strong> — speaks remaining distance</li>
+            </ul>
+        </div>
+
+        <div id="panel-share" class="menu-panel">
+            <h3>Share Your Location</h3>
+            <p id="share-status">Turn on location to share it.</p>
+            <button id="share-location-btn">Share My Location</button>
+        </div>
+
+        <div id="panel-language" class="menu-panel">
+            <h3>Language</h3>
+            <select id="language-select">
+                <option value="en">English</option>
+                <option value="fr">Français (French)</option>
+                <option value="fat">Fante</option>
+            </select>
+            <p id="language-note" style="font-size: 13px; color: #6b7280; margin-top: 10px;"></p>
+        </div>
+
+        <div id="panel-history" class="menu-panel">
+            <h3>Recent Destinations</h3>
+            <div id="history-list"><p>No recent trips yet.</p></div>
+            <button id="clear-history-btn">Clear History</button>
+        </div>
+    </div>
+</div>
+
 <h2>🎓 ALPHA — UEW South Campus Voice Navigator</h2>
 <button id="theme-toggle-btn">🌙 Dark Mode</button>
-
 
 <div id="map" style="height: 60vh; width: 100%;"></div>
 
@@ -151,6 +197,148 @@ function startListening() {
     }
 }
 // =====================================================================
+// HAMBURGER MENU
+// =====================================================================
+const hamburgerBtn = document.getElementById('hamburger-btn');
+const menuOverlay = document.getElementById('menu-overlay');
+const closeMenuBtn = document.getElementById('close-menu-btn');
+
+hamburgerBtn.addEventListener('click', () => menuOverlay.classList.add('open'));
+closeMenuBtn.addEventListener('click', () => menuOverlay.classList.remove('open'));
+menuOverlay.addEventListener('click', (e) => {
+    if (e.target === menuOverlay) menuOverlay.classList.remove('open');
+});
+
+document.querySelectorAll('.menu-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.menu-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById(btn.dataset.panel).classList.add('active');
+    });
+});
+
+// ---------- Share Location ----------
+document.getElementById('share-location-btn').addEventListener('click', async () => {
+    const shareStatusEl = document.getElementById('share-status');
+
+    if (!lastKnownPosition) {
+        shareStatusEl.textContent = 'No location available yet. Wait for GPS to lock.';
+        return;
+    }
+
+    const mapsLink = `https://www.google.com/maps?q=${lastKnownPosition.lat},${lastKnownPosition.lon}`;
+    const shareText = `I'm here on UEW South Campus: ${mapsLink}`;
+
+    if (navigator.share) {
+        try {
+            await navigator.share({ title: 'My Location', text: shareText, url: mapsLink });
+            shareStatusEl.textContent = 'Location shared!';
+        } catch (err) {
+            shareStatusEl.textContent = 'Sharing cancelled.';
+        }
+    } else {
+        try {
+            await navigator.clipboard.writeText(shareText);
+            shareStatusEl.textContent = 'Location link copied to clipboard!';
+        } catch (err) {
+            shareStatusEl.textContent = shareText; // last resort: just display it
+        }
+    }
+});
+
+// ---------- Language ----------
+// Browser speech engines reliably support English and French. Fante
+// (Akan) is not consistently supported for speech recognition or
+// synthesis across browsers -- selecting it translates the visible
+// text where possible, but voice input/output stays in English until
+// broader browser support exists. This is stated plainly rather than
+// silently failing.
+const UI_TRANSLATIONS = {
+    en: {
+        title: '🎓 ALPHA — UEW South Campus Voice Navigator',
+        micBtn: '🎤 Listen Now',
+        note: ''
+    },
+    fr: {
+        title: '🎓 ALPHA — Navigateur Vocal du Campus Sud UEW',
+        micBtn: '🎤 Écouter',
+        note: 'La reconnaissance et la synthèse vocale sont disponibles en français.'
+    },
+    fat: {
+        title: '🎓 ALPHA — UEW South Campus Kwan Kyerɛfoɔ',
+        micBtn: '🎤 Tie Seesei',
+        note: 'Fante text is shown where available. Voice input/output currently remains in English, since browsers do not yet reliably support Fante speech recognition or synthesis.'
+    }
+};
+
+const languageSelect = document.getElementById('language-select');
+const languageNoteEl = document.getElementById('language-note');
+
+function applyLanguage(langCode) {
+    const t = UI_TRANSLATIONS[langCode] || UI_TRANSLATIONS.en;
+    document.querySelector('h2').textContent = t.title;
+    micBtn.textContent = t.micBtn;
+    languageNoteEl.textContent = t.note;
+
+    if (recognizerRef) {
+        recognizerRef.lang = langCode === 'fr' ? 'fr-FR' : 'en-US'; // Fante falls back to English recognition
+    }
+    window.ALPHA_SPEECH_LANG = langCode === 'fr' ? 'fr-FR' : 'en-US'; // used by speak()
+
+    localStorage.setItem('alpha-language', langCode);
+}
+
+const savedLanguage = localStorage.getItem('alpha-language') || 'en';
+languageSelect.value = savedLanguage;
+applyLanguage(savedLanguage);
+
+languageSelect.addEventListener('change', () => applyLanguage(languageSelect.value));
+
+// ---------- Map History ----------
+function getHistory() {
+    try {
+        return JSON.parse(localStorage.getItem('alpha-history') || '[]');
+    } catch (err) {
+        return [];
+    }
+}
+
+function addToHistory(destinationName) {
+    const history = getHistory();
+    history.unshift({ name: destinationName, time: new Date().toLocaleString() });
+    localStorage.setItem('alpha-history', JSON.stringify(history.slice(0, 10)));
+    renderHistory();
+}
+
+function renderHistory() {
+    const history = getHistory();
+    const listEl = document.getElementById('history-list');
+
+    if (history.length === 0) {
+        listEl.innerHTML = '<p>No recent trips yet.</p>';
+        return;
+    }
+
+    listEl.innerHTML = '';
+    history.forEach((entry) => {
+        const div = document.createElement('div');
+        div.className = 'history-entry';
+        div.textContent = `${entry.name} — ${entry.time}`;
+        div.addEventListener('click', () => {
+            menuOverlay.classList.remove('open');
+            handleManualInput(`take me to ${entry.name}`);
+        });
+        listEl.appendChild(div);
+    });
+}
+
+document.getElementById('clear-history-btn').addEventListener('click', () => {
+    localStorage.removeItem('alpha-history');
+    renderHistory();
+});
+
+renderHistory();
+
+// =====================================================================
 // DARK MODE TOGGLE
 // =====================================================================
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
@@ -189,13 +377,13 @@ function speak(text) {
         try { recognizerRef.stop(); } catch (err) { /* ignore */ }
     }
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = window.ALPHA_SPEECH_LANG || 'en-US';
     utterance.onend = () => {
         clearTimeout(restartTimeout);
         restartTimeout = setTimeout(startListening, 400);
     };
     speechSynthesis.speak(utterance);
 }
-
 function speakThen(text, callback) {
     if (recognizerRef) {
         try { recognizerRef.stop(); } catch (err) { /* ignore */ }
@@ -303,6 +491,8 @@ async function sendCommand(commandText) {
         drawRoute(data.coordinates);
         statusEl.innerText = data.spoken_reply;
         startTrip(data);
+        addToHistory(commandText);
+
     } catch (err) {
         console.warn('Route request failed:', err);
         statusEl.innerText = 'Something went wrong reaching ALPHA. Please try again.';
