@@ -94,3 +94,51 @@ button:active {
         width: 100%;
     }
 }
+
+/* ---------- Dark mode ---------- */
+body.dark-mode {
+    background-color: #121212;
+    color: #f1f1f1;
+}
+
+body.dark-mode h2 {
+    color: #f1f1f1;
+}
+
+body.dark-mode #status {
+    color: #cbd5e1;
+}
+
+body.dark-mode #destination-select,
+body.dark-mode #text-fallback {
+    background-color: #1e1e1e;
+    color: #f1f1f1;
+    border: 1px solid #3f3f46;
+}
+
+body.dark-mode button {
+    background-color: #3b82f6;
+}
+
+body.dark-mode button:active {
+    background-color: #2563eb;
+}
+
+/* Dark mode toggle button, distinct styling from the main action buttons */
+#theme-toggle-btn {
+    background-color: transparent;
+    border: 2px solid #2563eb;
+    color: #2563eb;
+    font-size: 14px;
+    padding: 8px 16px;
+    margin-top: 10px;
+}
+
+body.dark-mode #theme-toggle-btn {
+    border-color: #f1f1f1;
+    color: #f1f1f1;
+}
+
+body.dark-mode #map {
+    filter: brightness(0.85) contrast(1.05); /* subtly dims the map tiles to fit dark mode */
+}

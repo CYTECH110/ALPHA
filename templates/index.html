@@ -16,6 +16,8 @@
 <body>
 
 <h2>🎓 ALPHA — UEW South Campus Voice Navigator</h2>
+<button id="theme-toggle-btn">🌙 Dark Mode</button>
+
 
 <div id="map" style="height: 60vh; width: 100%;"></div>
 
@@ -148,6 +150,36 @@ function startListening() {
         restartTimeout = setTimeout(startListening, 500);
     }
 }
+// =====================================================================
+// DARK MODE TOGGLE
+// =====================================================================
+const themeToggleBtn = document.getElementById('theme-toggle-btn');
+
+function applyTheme(isDark) {
+    if (isDark) {
+        document.body.classList.add('dark-mode');
+        themeToggleBtn.textContent = '☀️ Light Mode';
+    } else {
+        document.body.classList.remove('dark-mode');
+        themeToggleBtn.textContent = '🌙 Dark Mode';
+    }
+}
+
+// Restore the user's last choice, defaulting to their system preference
+// if they've never toggled it manually before.
+const savedTheme = localStorage.getItem('alpha-theme');
+const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const startInDarkMode = savedTheme ? savedTheme === 'dark' : systemPrefersDark;
+
+applyTheme(startInDarkMode);
+
+themeToggleBtn.addEventListener('click', () => {
+    const isCurrentlyDark = document.body.classList.contains('dark-mode');
+    const switchToDark = !isCurrentlyDark;
+    applyTheme(switchToDark);
+    localStorage.setItem('alpha-theme', switchToDark ? 'dark' : 'light');
+});
+
 
 // =====================================================================
 // 3. TEXT-TO-SPEECH -- pauses the mic while ALPHA talks, then resumes
