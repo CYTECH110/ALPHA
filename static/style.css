@@ -177,11 +177,16 @@ body.dark-mode #map {
     max-width: 85vw;
     height: 100%;
     background: white;
+    color: #111827;
     box-shadow: 2px 0 12px rgba(0,0,0,0.3);
     padding: 20px;
     overflow-y: auto;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
+}
+
+#menu-drawer h3 {
+    color: #111827;
 }
 
 #menu-overlay.open #menu-drawer {
@@ -201,6 +206,7 @@ body.dark-mode #menu-drawer {
     border: none;
     padding: 14px 8px;
     font-size: 16px;
+    color: #111827;
     border-bottom: 1px solid #e5e7eb;
     cursor: pointer;
 }
@@ -219,8 +225,13 @@ body.dark-mode .menu-item {
     display: block;
 }
 
+.menu-panel {
+    color: #111827;
+}
+
 .menu-panel h3 {
     margin-top: 0;
+    color: #111827;
 }
 
 .menu-panel ul {
@@ -237,7 +248,7 @@ body.dark-mode .menu-item {
     border: none;
     font-size: 20px;
     cursor: pointer;
-    color: inherit;
+    color: #111827;
 }
 
 .history-entry {
