@@ -35,6 +35,12 @@ CAMPUS_LOCATIONS = {
     "transport unit":             (5.33963, -0.62714),
     "clinic":                     (5.33850, -0.62403),
     "winneba guesthouse":         (5.33758, -0.62987),
+
+    # Newly added locations
+    "slt 7":                      (5.33910, -0.62682),
+    "slt 8":                      (5.33910, -0.62682),   # NOTE: identical to SLT 7 -- verify with calibration tool
+    "french department":          (5.33931, -0.62696),
+    "school of business":         (5.33865, -0.62499),
 }
 
 # For destinations that OSRM incorrectly routes to via the long outer

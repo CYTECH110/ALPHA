@@ -177,14 +177,12 @@ def find_nearest_landmark(user_coords):
 
 
 if __name__ == "__main__":
-    test_pairs = [
-        ("science department", "library"),   # should follow University Street now
-        ("ict department", "volleyball court"),  # should stay a direct line (wall detour)
-        ("entrance", "advance park"),         # should follow real public roads
-        ("library", "south market"),          # should follow real public roads
-    ]
+    test_destinations = ["slt 7", "slt 8", "french department", "school of business"]
 
-    for start, destination in test_pairs:
-        result = find_route(start, destination)
-        print(f"{start} -> {destination}: {result['distance_meters']} m, "
-              f"{len(result['coordinates'])} waypoints")
+    for destination in test_destinations:
+        result = find_route("entrance", destination)
+        if "error" in result:
+            print(f"entrance -> {destination}: ERROR - {result['error']}")
+        else:
+            print(f"entrance -> {destination}: {result['distance_meters']} m, "
+                  f"{len(result['coordinates'])} waypoints")
